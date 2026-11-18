@@ -1,0 +1,10 @@
+names: ["Jonathan Q. Testperson"]   # full legal name; variants are auto-generated
+aliases: ["Jon Testperson"]         # nicknames, maiden names, etc.
+dob: "1984-07-09"
+addresses: ["123 Fake Street, Springfield, ON A1B 2C3"]
+phones: ["+1 555-010-0199"]
+emails: ["jon@example.com"]
+ids:                                # health card, MRN, insurance, etc.
+  - {label: health_card, value: "1234-567-890-AB"}
+  - {label: mrn, value: "MRN0042"}
+extra_terms: []                     # anything else to always redact (employer, family names)

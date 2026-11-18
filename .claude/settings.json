@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./data/incoming/**)",
+      "Read(./data/private/**)",
+      "Read(./data/quarantine/**)",
+      "Read(./identity.yaml)",
+      "Edit(./identity.yaml)",
+      "Write(./identity.yaml)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_private.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -186,6 +186,34 @@ def cmd_scrub(args):
     return 1 if errors else 0
 
 
+# ---------------------------------------------------------------- fetch-drive-folder
+
+def cmd_fetch_drive_folder(args):
+    from .drive_fetch import fetch_public_folder, FetchError
+    dirs = _dirs(args)
+    out_dir = Path(args.out) if args.out else dirs.incoming
+    try:
+        results = fetch_public_folder(args.url, out_dir, max_files=args.max_files)
+    except FetchError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    skipped_dir = out_dir / "_skipped"
+    n_ready = n_skip = 0
+    for r in results:
+        if r["status"] == "ready":
+            n_ready += 1
+            print(f"READY {r['name']} ({r['size']} bytes)")
+        else:
+            n_skip += 1
+            skipped_dir.mkdir(exist_ok=True)
+            Path(r["path"]).rename(skipped_dir / r["path"].name)
+            print(f"SKIPPED {r['name']} ({r['status']})")
+    print(f"Summary: {n_ready} ready in {out_dir}, {n_skip} skipped")
+    if n_ready:
+        print(f"Next: healthbot scrub {out_dir}")
+    return 0
+
+
 # ---------------------------------------------------------------- show
 
 def _parse_pages(spec, n):
@@ -295,6 +323,15 @@ def build_parser():
     s.add_argument("paths", nargs="*", help="files or directories; omit for data/incoming")
     common(s)
     s.set_defaults(func=cmd_scrub)
+
+    s = sub.add_parser("fetch-drive-folder",
+                        help="download files from a PUBLIC Google Drive folder (no auth) "
+                             "straight to disk; bytes never pass through an LLM")
+    s.add_argument("url", help="Drive folder URL or id; must be shared \"Anyone with the link\"")
+    s.add_argument("--out", help="destination dir (default: data/incoming)")
+    s.add_argument("--max-files", type=int, default=50, help="refuse folders larger than this")
+    common(s)
+    s.set_defaults(func=cmd_fetch_drive_folder)
 
     s = sub.add_parser("show", help="print the scrubbed Markdown of an archived document")
     s.add_argument("id", help="neutral document id, e.g. doc-0001")

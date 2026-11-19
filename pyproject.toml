@@ -7,7 +7,7 @@ name = "healthbot"
 version = "0.1.0"
 description = "Privacy-preserving health records scrubber and knowledge base"
 requires-python = ">=3.11"
-dependencies = ["pymupdf", "pymupdf4llm", "pyyaml", "python-dateutil"]
+dependencies = ["pymupdf", "pymupdf4llm", "pyyaml", "python-dateutil", "gdown"]
 
 [project.optional-dependencies]
 dev = ["pytest", "reportlab"]

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>healthbot</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>healthbot <span class="sub">local · de-identified</span></h1>
+    <p class="disclaimer">Educational demo, not medical advice.</p>
+  </header>
+  <div id="banners"></div>
+  <main>
+    <section id="left">
+      <div class="panel">
+        <h2>Add records</h2>
+        <button id="pick">Choose folder…</button>
+        <p class="hint">Opens the macOS folder dialog. Files are scrubbed on this machine;
+          neither the browser nor Claude sees the originals.</p>
+        <table id="scrub-results" hidden>
+          <thead><tr><th>Doc</th><th>Status</th><th>Redactions</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="scrub-note" class="hint"></p>
+        <button id="ingest" hidden></button>
+      </div>
+      <div class="panel">
+        <h2>Records <button id="refresh" class="small" title="Refresh">↻</button></h2>
+        <div id="views"></div>
+        <ul id="records"></ul>
+      </div>
+    </section>
+    <section id="center">
+      <div id="viewer" hidden>
+        <div class="viewer-bar"><span id="viewer-title"></span>
+          <button id="viewer-close" class="small">Close</button></div>
+        <div id="viewer-body" class="md"></div>
+      </div>
+      <div id="chat">
+        <div id="messages"></div>
+        <form id="composer">
+          <textarea id="input" rows="3" placeholder="Ask about your records…"></textarea>
+          <div class="composer-buttons">
+            <button type="submit" id="send">Send</button>
+            <button type="button" id="stop" disabled>Stop</button>
+            <button type="button" id="new-chat">New chat</button>
+          </div>
+        </form>
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -75,6 +75,9 @@ identity file from the repo root; `--identity PATH` overrides it (tests only).
   `data/records/<type-folder>/<id>.md`. Refuses to overwrite without `--force`; refuses any
   record containing identifiers.
 - `healthbot index`: rebuild `INDEX.md`, `lab-trends.md`, and `immunizations.md`.
+- `healthbot serve [--port 8765] [--no-open]`: localhost-only web UI (needs the `[web]`
+  extra). It scrubs via a native folder picker and chats through the Agent SDK. You never
+  run this yourself.
 
 Record frontmatter: `id` (date-type-slug), `date` (date of service), `type` (lab | imaging |
 clinical-note | immunization | medication | other), `title`, `provider` (specialty or clinic

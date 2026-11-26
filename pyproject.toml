@@ -10,13 +10,17 @@ requires-python = ">=3.11"
 dependencies = ["pymupdf", "pymupdf4llm", "pyyaml", "python-dateutil", "gdown"]
 
 [project.optional-dependencies]
-dev = ["pytest", "reportlab"]
+dev = ["pytest", "reportlab", "httpx"]
+web = ["fastapi", "uvicorn", "claude-agent-sdk", "markdown-it-py"]
 
 [project.scripts]
 healthbot = "healthbot.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"healthbot.web" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

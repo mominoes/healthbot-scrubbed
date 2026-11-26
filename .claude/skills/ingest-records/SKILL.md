@@ -82,9 +82,21 @@ scrubbed text. Read AGENTS.md section 2 first if unsure about any privacy rule.
    Facts are verbatim with page cites. Numbers in the AI summary must already appear in the
    facts table. Keep the summary strictly separate from facts.
 
-6. **Write.** Pipe the full record to `.venv/bin/healthbot record write --stdin` (add
-   `--force` only if the user agrees to overwrite). If it refuses because it found an
-   identifier, remove that content, retry, and tell the user the category only.
+6. **Write.** Send the full record to `.venv/bin/healthbot record write --stdin` (add
+   `--force` only if the user agrees to overwrite). Use a quoted heredoc with nothing before
+   or after it, because that is the only form the web UI allows:
+
+   ```bash
+   .venv/bin/healthbot record write --stdin <<'EOF'
+   ---
+   id: ...
+   ---
+   ...
+   EOF
+   ```
+
+   If it refuses because it found an identifier, remove that content, retry, and tell the
+   user the category only.
 
 7. **Index.** After all records are written, run `.venv/bin/healthbot index`.
 

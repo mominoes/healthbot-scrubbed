@@ -7,6 +7,8 @@ import re
 import shlex
 import shutil
 import sys
+import threading
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -88,18 +90,17 @@ def _expand_arg(arg):
 
 
 def _collect(args_paths, dirs):
-    """Return (list of (Path, from_incoming), errors, skipped_non_pdf)."""
-    errors, skipped = 0, 0
+    """Return (list of (Path, from_incoming), list of bad argument numbers, skipped_non_pdf)."""
+    bad_args, skipped = [], 0
     files = []
     if not args_paths:
         roots = [dirs.incoming]
     else:
         roots = []
         for i, a in enumerate(args_paths, 1):
-            found = _expand_arg(a)
+            found = _expand_arg(str(a))
             if not found:
-                print(f"ERROR: argument #{i}: path not found")
-                errors += 1
+                bad_args.append(i)
             roots += found
     incoming = dirs.incoming.resolve()
     seen = set()
@@ -121,7 +122,7 @@ def _collect(args_paths, dirs):
                 skipped += 1
                 continue
             files.append((p, rp.is_relative_to(incoming)))
-    return files, errors, skipped
+    return files, bad_args, skipped
 
 
 def _fmt_counts(counts):
@@ -132,58 +133,104 @@ def _fmt_counts(counts):
 
 # ---------------------------------------------------------------- scrub
 
+# manifest.json is not safe for concurrent writers (CLI + web server threads).
+SCRUB_LOCK = threading.Lock()
+
+
+@dataclass
+class ScrubOutcome:
+    """One result of scrub_paths. Never carries filenames, paths, or identifier values.
+
+    status: ok | needs_ocr | encrypted | leak | error  (a processed file)
+            duplicate    (already archived; doc_id is the existing id)
+            path_error   (argument number `arg` did not exist; doc_id is None)
+            non_pdf      (skipped file; doc_id is None)
+    """
+    doc_id: str | None
+    status: str
+    counts: dict = field(default_factory=dict)    # ok only: category -> redaction count
+    findings: list = field(default_factory=list)  # leak only: category names
+    arg: int | None = None                        # path_error only
+
+    def to_dict(self):
+        return asdict(self)
+
+
+def scrub_paths(paths, identity, dirs) -> list:
+    """Scrub files/dirs in `paths` (empty = dirs.incoming). Returns list[ScrubOutcome].
+
+    Files inside incoming are moved into the archive; files elsewhere are copied.
+    Holds SCRUB_LOCK for the whole run.
+    """
+    from . import scrub as scrub_mod
+    with SCRUB_LOCK:
+        for d in (dirs.incoming, dirs.private, dirs.quarantine):
+            d.mkdir(parents=True, exist_ok=True)
+        files, bad_args, skipped = _collect(list(paths), dirs)
+        out = [ScrubOutcome(None, "path_error", arg=i) for i in bad_args]
+        out += [ScrubOutcome(None, "non_pdf") for _ in range(skipped)]
+        manifest = _load_manifest(dirs)
+        for path, from_incoming in files:
+            sha = hashlib.sha256(path.read_bytes()).hexdigest()
+            dup = next((d for d in manifest["docs"].values() if d["sha256"] == sha), None)
+            if dup:
+                out.append(ScrubOutcome(dup["id"], "duplicate"))
+                if from_incoming:
+                    path.unlink()  # byte-identical copy is already archived
+                continue
+            nums = [int(k[4:]) for k in manifest["docs"]]
+            doc_id = f"doc-{(max(nums) if nums else 0) + 1:04d}"
+            res = scrub_mod.scrub_pdf(path, identity)
+            ok = res.status == scrub_mod.OK
+            dest_dir = dirs.private if ok else dirs.quarantine
+            dest = dest_dir / f"{doc_id}.pdf"
+            if from_incoming:
+                shutil.move(str(path), str(dest))
+            else:
+                shutil.copy2(str(path), str(dest))
+            manifest["docs"][doc_id] = {
+                "id": doc_id, "sha256": sha, "original_name": path.name,
+                "status": "ok" if ok else "quarantined",
+                "reason": None if ok else res.status,
+                "pages": len(res.pages) if ok else None,
+                "archived": str(dest.relative_to(dirs.data)),
+                "added": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }
+            _save_manifest(dirs, manifest)
+            out.append(ScrubOutcome(doc_id, res.status,
+                                    counts=dict(res.counts) if ok else {},
+                                    findings=list(res.findings)))
+        return out
+
+
 def cmd_scrub(args):
-    from .scrub import OK, scrub_pdf
     identity = _load_identity(args)
     if identity is None:
         return 2
-    dirs = _dirs(args)
-    for d in (dirs.incoming, dirs.private, dirs.quarantine):
-        d.mkdir(parents=True, exist_ok=True)
-    files, errors, skipped = _collect(args.paths, dirs)
-    manifest = _load_manifest(dirs)
-    n_ok = n_q = n_dup = 0
-    for path, from_incoming in files:
-        sha = hashlib.sha256(path.read_bytes()).hexdigest()
-        dup = next((d for d in manifest["docs"].values() if d["sha256"] == sha), None)
-        if dup:
-            n_dup += 1
-            print(f"SKIPPED {dup['id']} (duplicate)")
-            if from_incoming:
-                path.unlink()  # byte-identical copy is already archived
-            continue
-        nums = [int(k[4:]) for k in manifest["docs"]]
-        doc_id = f"doc-{(max(nums) if nums else 0) + 1:04d}"
-        res = scrub_pdf(path, identity)
-        ok = res.status == OK
-        dest_dir = dirs.private if ok else dirs.quarantine
-        dest = dest_dir / f"{doc_id}.pdf"
-        if from_incoming:
-            shutil.move(str(path), str(dest))
+    outcomes = scrub_paths(args.paths, identity, _dirs(args))
+    n = {"ok": 0, "q": 0, "dup": 0, "non_pdf": 0, "path_error": 0}
+    for o in outcomes:
+        if o.status == "path_error":
+            n["path_error"] += 1
+            print(f"ERROR: argument #{o.arg}: path not found")
+        elif o.status == "non_pdf":
+            n["non_pdf"] += 1
+        elif o.status == "duplicate":
+            n["dup"] += 1
+            print(f"SKIPPED {o.doc_id} (duplicate)")
+        elif o.status == "ok":
+            n["ok"] += 1
+            print(f"OK {o.doc_id} ({_fmt_counts(o.counts)})")
         else:
-            shutil.copy2(str(path), str(dest))
-        manifest["docs"][doc_id] = {
-            "id": doc_id, "sha256": sha, "original_name": path.name,
-            "status": "ok" if ok else "quarantined",
-            "reason": None if ok else res.status,
-            "pages": len(res.pages) if ok else None,
-            "archived": str(dest.relative_to(dirs.data)),
-            "added": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        }
-        _save_manifest(dirs, manifest)
-        if ok:
-            n_ok += 1
-            print(f"OK {doc_id} ({_fmt_counts(res.counts)})")
-        else:
-            n_q += 1
-            why = res.status
-            if res.findings:
-                why += ": " + ", ".join(res.findings)
-            print(f"QUARANTINED {doc_id} ({why})")
-    print(f"Summary: {n_ok} ok, {n_q} quarantined, {n_dup} duplicate"
-          + (f", {skipped} non-PDF skipped" if skipped else "")
-          + (f", {errors} path error(s)" if errors else ""))
-    return 1 if errors else 0
+            n["q"] += 1
+            why = o.status
+            if o.findings:
+                why += ": " + ", ".join(o.findings)
+            print(f"QUARANTINED {o.doc_id} ({why})")
+    print(f"Summary: {n['ok']} ok, {n['q']} quarantined, {n['dup']} duplicate"
+          + (f", {n['non_pdf']} non-PDF skipped" if n["non_pdf"] else "")
+          + (f", {n['path_error']} path error(s)" if n["path_error"] else ""))
+    return 1 if n["path_error"] else 0
 
 
 # ---------------------------------------------------------------- fetch-drive-folder
@@ -309,6 +356,19 @@ def cmd_index(args):
     return 0
 
 
+# ---------------------------------------------------------------- serve
+
+def cmd_serve(args):
+    try:
+        from .web.server import serve
+    except ImportError:
+        print("ERROR: the web UI needs extra packages. Run: .venv/bin/pip install -e '.[web]'",
+              file=sys.stderr)
+        return 2
+    serve(port=args.port, open_browser=not args.no_open)
+    return 0
+
+
 # ---------------------------------------------------------------- parser
 
 def build_parser():
@@ -351,6 +411,11 @@ def build_parser():
     s = sub.add_parser("index", help="rebuild records index")
     common(s)
     s.set_defaults(func=cmd_index)
+
+    s = sub.add_parser("serve", help="local web UI on 127.0.0.1 (needs the [web] extra)")
+    s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--no-open", action="store_true", help="don't open a browser")
+    s.set_defaults(func=cmd_serve)
     return p
 
 
